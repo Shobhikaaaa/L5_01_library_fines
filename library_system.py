@@ -1,78 +1,86 @@
+"""Library book loan, renewal, and fine management system."""
+
+import ast
 import json
+import operator
 from datetime import datetime
 
-loans = {}
 FINE_PER_DAY = 2
 
+ALLOWED_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
 
-def add_book_loan(student_id, book_id, dates=[]):
+
+def add_book_loan(loans, student_id, book_id, dates=None):
+    """Record a book loan for a student."""
     if not student_id:
-        return
+        return loans
+
+    if dates is None:
+        dates = []
 
     dates.append(str(datetime.now()))
     loans[student_id] = loans.get(student_id, []) + [book_id]
+
     print(
-        "%s borrowed %s (loan dates on record: %d)"
-        % (student_id, book_id, len(dates))
+        f"{student_id} borrowed {book_id} "
+        f"(loan dates on record: {len(dates)})"
     )
+    return loans
 
 
-def return_book(student_id, book_id):
-    try:
+def return_book(loans, student_id, book_id):
+    """Remove a returned book from a student's loan records."""
+    if student_id in loans and book_id in loans[student_id]:
         loans[student_id].remove(book_id)
-        if len(loans[student_id]) == 0:
+
+        if not loans[student_id]:
             del loans[student_id]
-    except (KeyError, ValueError):
-        return
+
+    return loans
 
 
-def calculate_fine(days_overdue):
-    return days_overdue * FINE_PER_DAY
+def calculate_fine(days_overdue, fine_per_day=FINE_PER_DAY):
+    """Calculate the fine for overdue days."""
+    return max(0, days_overdue) * fine_per_day
 
 
-def renewBook(student_id, book_id, extra_days):
-    global FINE_PER_DAY
+def renew_book(student_id, book_id, extra_days, fine_per_day):
+    """Renew a book and update the fine rate for long renewals."""
     if extra_days > 14:
-        FINE_PER_DAY = FINE_PER_DAY + 1
+        fine_per_day += 1
 
     print(
-        "Renewed "
-        + book_id
-        + " for "
-        + student_id
-        + " by "
-        + str(extra_days)
-        + " days"
+        f"Renewed {book_id} for {student_id} "
+        f"by {extra_days} days"
     )
+    return fine_per_day
 
 
 def load_records(file="loans.json"):
-    f = open(file, "r")
-    global loans
-    loans = json.loads(f.read())
-    f.close()
+    """Load loan records from a JSON file."""
+    try:
+        with open(file, "r", encoding="utf-8") as records_file:
+            return json.load(records_file)
+    except FileNotFoundError:
+        return {}
 
 
-def save_records(file="loans.json"):
-    f = open(file, "w")
-    f.write(json.dumps(loans))
-    f.close()
+def save_records(loans, file="loans.json"):
+    """Save loan records to a JSON file."""
+    with open(file, "w", encoding="utf-8") as records_file:
+        json.dump(loans, records_file, indent=4)
 
 
 def fine_from_rule(rule, days):
     """Calculate a fine using a restricted arithmetic expression."""
-    import ast
-    import operator
-
-    allowed_operators = {
-        ast.Add: operator.add,
-        ast.Sub: operator.sub,
-        ast.Mult: operator.mul,
-        ast.Div: operator.truediv,
-        ast.FloorDiv: operator.floordiv,
-        ast.Mod: operator.mod,
-        ast.Pow: operator.pow,
-    }
 
     def evaluate(node):
         if isinstance(node, ast.Expression):
@@ -89,7 +97,7 @@ def fine_from_rule(rule, days):
             return days
 
         if isinstance(node, ast.BinOp):
-            operation = allowed_operators.get(type(node.op))
+            operation = ALLOWED_OPERATORS.get(type(node.op))
             if operation is None:
                 raise ValueError("Unsupported operator.")
 
@@ -112,31 +120,48 @@ def fine_from_rule(rule, days):
     try:
         expression = ast.parse(rule, mode="eval")
         return evaluate(expression)
-    except (SyntaxError, TypeError, ZeroDivisionError, OverflowError) as error:
+    except (
+        SyntaxError,
+        TypeError,
+        ZeroDivisionError,
+        OverflowError,
+    ) as error:
         raise ValueError("Invalid fine calculation rule.") from error
 
 
-def print_report():
+def print_report(loans):
+    """Display all current book loans."""
     print("Loan Report")
-    for student in loans:
-        print(student, "->", loans[student])
+    for student, books in loans.items():
+        print(student, "->", books)
 
 
 def main():
-    add_book_loan("S101", "B-ALGO")
-    add_book_loan("S102", "B-NETW")
-    add_book_loan("", "B-DBMS")
-    add_book_loan("S103", "4521")
-    return_book("S999", "B-NONE")
-    renewBook("S101", "B-ALGO", 21)
-    print("Fine for 5 days:", calculate_fine(5))
-    print("Fine for -3 days:", calculate_fine(-3))
+    """Run the library loan management demonstration."""
+    loans = {}
+    fine_per_day = FINE_PER_DAY
+
+    loans = add_book_loan(loans, "S101", "B-ALGO")
+    loans = add_book_loan(loans, "S102", "B-NETW")
+    loans = add_book_loan(loans, "", "B-DBMS")
+    loans = add_book_loan(loans, "S103", "4521")
+
+    loans = return_book(loans, "S999", "B-NONE")
+
+    fine_per_day = renew_book(
+        "S101", "B-ALGO", 21, fine_per_day
+    )
+
+    print("Fine for 5 days:", calculate_fine(5, fine_per_day))
+    print("Fine for -3 days:", calculate_fine(-3, fine_per_day))
     print("Fine via rule:", fine_from_rule("days * 2 + 10", 4))
+
     days = input("Days overdue for S102 (press Enter for 0): ") or "0"
-    print("S102 owes:", calculate_fine(int(days)))
-    save_records()
-    load_records()
-    print_report()
+    print("S102 owes:", calculate_fine(int(days), fine_per_day))
+
+    save_records(loans)
+    loans = load_records()
+    print_report(loans)
 
 
 if __name__ == "__main__":
