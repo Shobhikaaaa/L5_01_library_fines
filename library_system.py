@@ -60,7 +60,60 @@ def save_records(file="loans.json"):
 
 
 def fine_from_rule(rule, days):
-    return eval(rule.replace("days", str(days)))
+    """Calculate a fine using a restricted arithmetic expression."""
+    import ast
+    import operator
+
+    allowed_operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+    }
+
+    def evaluate(node):
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)) and not isinstance(
+                node.value, bool
+            ):
+                return node.value
+            raise ValueError("Only numeric constants are allowed.")
+
+        if isinstance(node, ast.Name) and node.id == "days":
+            return days
+
+        if isinstance(node, ast.BinOp):
+            operation = allowed_operators.get(type(node.op))
+            if operation is None:
+                raise ValueError("Unsupported operator.")
+
+            left = evaluate(node.left)
+            right = evaluate(node.right)
+
+            if isinstance(node.op, ast.Pow) and abs(right) > 10:
+                raise ValueError("Exponent is too large.")
+
+            return operation(left, right)
+
+        if isinstance(node, ast.UnaryOp) and isinstance(
+            node.op, (ast.UAdd, ast.USub)
+        ):
+            value = evaluate(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+
+        raise ValueError("Invalid fine calculation rule.")
+
+    try:
+        expression = ast.parse(rule, mode="eval")
+        return evaluate(expression)
+    except (SyntaxError, TypeError, ZeroDivisionError, OverflowError) as error:
+        raise ValueError("Invalid fine calculation rule.") from error
 
 
 def print_report():
